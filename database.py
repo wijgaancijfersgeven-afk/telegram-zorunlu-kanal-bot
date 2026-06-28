@@ -120,6 +120,19 @@ def init_db():
 
         conn.execute("INSERT OR IGNORE INTO reward_links (label, url) VALUES (?, ?)",
                      ("Ana Grup", "https://t.me/+aceUsVtKUB03OWI8"))
+
+        # Varsayılan kanallar - admin silebilir
+        default_channels = [
+            ("@antinotice", "antinotice", "https://t.me/antinotice"),
+            ("@regsafetelegramin", "regsafetelegramin", "https://t.me/regsafetelegramin"),
+            ("@safeteIegramin", "safeteIegramin", "https://t.me/safeteIegramin"),
+        ]
+        for ch_id, ch_name, ch_link in default_channels:
+            conn.execute(
+                "INSERT OR IGNORE INTO channels (channel_id, channel_name, invite_link) VALUES (?, ?, ?)",
+                (ch_id, ch_name, ch_link)
+            )
+
         conn.commit()
 
 
