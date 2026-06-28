@@ -11,10 +11,26 @@ def join_keyboard(not_joined: list, btn_text: str = "✅ Katıldım, Kontrol Et"
     return kb
 
 
+def referral_keyboard(ref_link: str, count: int, required: int) -> InlineKeyboardMarkup:
+    remaining = required - count
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton(f"📊 Referanslarım ({count}/{required})", callback_data="ref_status"))
+    kb.add(InlineKeyboardButton("🔗 Davet Linkimi Kopyala", switch_inline_query=ref_link))
+    kb.add(InlineKeyboardButton(f"⏳ {remaining} kişi daha davet et", callback_data="ref_status"))
+    return kb
+
+
 def reward_keyboard(links: list) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=1)
     for lnk in links:
         kb.add(InlineKeyboardButton(f"🔗 {lnk['label']}", url=lnk["url"]))
+    return kb
+
+
+def ref_status_keyboard(ref_link: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton("🔄 Yenile", callback_data="ref_status"))
+    kb.add(InlineKeyboardButton("🔗 Davet Linkimi Gör", callback_data="ref_link"))
     return kb
 
 
@@ -52,8 +68,6 @@ def back_kb(target: str = "adm_main") -> InlineKeyboardMarkup:
     return kb
 
 
-# ─── Kanal Yönetimi ─────────────────────────────────────────
-
 def channel_list_kb(channels) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=1)
     for ch in channels:
@@ -64,8 +78,6 @@ def channel_list_kb(channels) -> InlineKeyboardMarkup:
     return kb
 
 
-# ─── Kullanıcı Yönetimi ──────────────────────────────────────
-
 def users_menu_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
@@ -74,8 +86,9 @@ def users_menu_kb() -> InlineKeyboardMarkup:
     )
     kb.add(
         InlineKeyboardButton("🚫 Banlı Kullanıcılar", callback_data="usr_banned"),
-        InlineKeyboardButton("◀️ Geri", callback_data="adm_main"),
+        InlineKeyboardButton("🏆 En Çok Davet Eden", callback_data="usr_toprefs"),
     )
+    kb.add(InlineKeyboardButton("◀️ Geri", callback_data="adm_main"))
     return kb
 
 
@@ -86,11 +99,10 @@ def user_detail_kb(user_id: int, is_banned: bool) -> InlineKeyboardMarkup:
     else:
         kb.add(InlineKeyboardButton("🚫 Banla", callback_data=f"usr_ban_{user_id}"))
     kb.add(InlineKeyboardButton("📣 Mesaj Gönder", callback_data=f"usr_msg_{user_id}"))
+    kb.add(InlineKeyboardButton("🎁 Ödülü Manuel Ver", callback_data=f"usr_givereward_{user_id}"))
     kb.add(InlineKeyboardButton("◀️ Geri", callback_data="usr_search"))
     return kb
 
-
-# ─── Yayın ──────────────────────────────────────────────────
 
 def broadcast_target_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=1)
@@ -110,8 +122,6 @@ def broadcast_confirm_kb(target: str) -> InlineKeyboardMarkup:
     return kb
 
 
-# ─── Ödül Linkleri ──────────────────────────────────────────
-
 def reward_mgmt_kb(links) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=1)
     for lnk in links:
@@ -126,19 +136,16 @@ def reward_mgmt_kb(links) -> InlineKeyboardMarkup:
     return kb
 
 
-# ─── Mesaj Düzenleme ─────────────────────────────────────────
-
 def messages_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(InlineKeyboardButton("👋 Karşılama Mesajı", callback_data="msg_welcome"))
-    kb.add(InlineKeyboardButton("✅ Başarı Mesajı", callback_data="msg_success"))
+    kb.add(InlineKeyboardButton("✅ Kanal Sonrası Mesaj", callback_data="msg_success"))
+    kb.add(InlineKeyboardButton("🎉 Ödül Mesajı", callback_data="msg_reward"))
     kb.add(InlineKeyboardButton("⏳ Beklemede Mesajı", callback_data="msg_pending"))
     kb.add(InlineKeyboardButton("🔘 Buton Yazısı", callback_data="msg_btntext"))
     kb.add(InlineKeyboardButton("◀️ Geri", callback_data="adm_main"))
     return kb
 
-
-# ─── Admin Yönetimi ──────────────────────────────────────────
 
 def admins_kb(admins) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=1)
@@ -149,9 +156,7 @@ def admins_kb(admins) -> InlineKeyboardMarkup:
     return kb
 
 
-# ─── Bot Ayarları ────────────────────────────────────────────
-
-def settings_kb(maintenance: bool, force_join: bool, bot_active: bool) -> InlineKeyboardMarkup:
+def settings_kb(maintenance: bool, force_join: bool, bot_active: bool, required_refs: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(InlineKeyboardButton(
         f"🔧 Bakım Modu: {'AÇIK 🟢' if maintenance else 'KAPALI 🔴'}",
@@ -164,6 +169,10 @@ def settings_kb(maintenance: bool, force_join: bool, bot_active: bool) -> Inline
     kb.add(InlineKeyboardButton(
         f"🤖 Bot: {'AKTİF 🟢' if bot_active else 'PASİF 🔴'}",
         callback_data="set_botactive"
+    ))
+    kb.add(InlineKeyboardButton(
+        f"🔢 Gerekli Referans: {required_refs} kişi",
+        callback_data="set_required_refs"
     ))
     kb.add(InlineKeyboardButton("✏️ Bakım Mesajı", callback_data="set_maintenancemsg"))
     kb.add(InlineKeyboardButton("◀️ Geri", callback_data="adm_main"))
