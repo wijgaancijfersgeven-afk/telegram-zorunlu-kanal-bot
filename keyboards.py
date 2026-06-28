@@ -143,6 +143,7 @@ def messages_kb() -> InlineKeyboardMarkup:
     kb.add(InlineKeyboardButton("🎉 Ödül Mesajı", callback_data="msg_reward"))
     kb.add(InlineKeyboardButton("⏳ Beklemede Mesajı", callback_data="msg_pending"))
     kb.add(InlineKeyboardButton("🔘 Buton Yazısı", callback_data="msg_btntext"))
+    kb.add(InlineKeyboardButton("📤 Davet Paylaşım Metni", callback_data="msg_sharetext"))
     kb.add(InlineKeyboardButton("◀️ Geri", callback_data="adm_main"))
     return kb
 
