@@ -1,6 +1,6 @@
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "bot.db")
 
@@ -8,6 +8,7 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "bot.db")
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
@@ -31,48 +32,82 @@ def init_db():
                 user_id INTEGER PRIMARY KEY,
                 username TEXT,
                 first_name TEXT,
+                last_name TEXT,
                 joined_at TEXT DEFAULT (datetime('now')),
                 is_member INTEGER DEFAULT 0,
-                last_seen TEXT
+                is_banned INTEGER DEFAULT 0,
+                ban_reason TEXT,
+                last_seen TEXT,
+                total_starts INTEGER DEFAULT 1
+            );
+
+            CREATE TABLE IF NOT EXISTS admins (
+                user_id INTEGER PRIMARY KEY,
+                added_by INTEGER,
+                added_at TEXT DEFAULT (datetime('now'))
             );
 
             CREATE TABLE IF NOT EXISTS broadcasts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_id INTEGER,
                 message TEXT,
-                sent_at TEXT DEFAULT (datetime('now')),
-                sent_count INTEGER DEFAULT 0
+                target TEXT DEFAULT 'all',
+                sent_count INTEGER DEFAULT 0,
+                failed_count INTEGER DEFAULT 0,
+                sent_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS admin_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_id INTEGER,
+                action TEXT,
+                detail TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS reward_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                label TEXT,
+                url TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now'))
             );
         """)
 
-        conn.execute(
-            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
-            ("reward_link", "https://t.me/+aceUsVtKUB03OWI8")
-        )
-        conn.execute(
-            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
-            ("welcome_message", "👋 Merhaba {name}!\n\nDevam etmek için aşağıdaki kanallara katılman gerekiyor.")
-        )
-        conn.execute(
-            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
-            ("success_message", "✅ Tebrikler! Tüm kanallara katıldın.\n\nİşte özel linkin:")
-        )
+        defaults = {
+            "welcome_message": "👋 Merhaba <b>{name}</b>!\n\nDevam etmek için aşağıdaki kanallara katılman gerekiyor. 👇",
+            "success_message": "✅ <b>Tebrikler!</b> Tüm kanallara katıldın.\n\nİşte sana özel link:",
+            "pending_message": "⏳ Henüz tüm kanallara katılmadın!\n\nLütfen tüm kanalları takip edip tekrar dene.",
+            "maintenance_mode": "0",
+            "maintenance_message": "🔧 Bot şu an bakımda. Lütfen daha sonra tekrar deneyin.",
+            "force_join": "1",
+            "bot_active": "1",
+            "join_button_text": "✅ Katıldım, Kontrol Et",
+            "start_photo": "",
+        }
+        for key, val in defaults.items():
+            conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, val))
+
+        conn.execute("INSERT OR IGNORE INTO reward_links (label, url) VALUES (?, ?)",
+                     ("Ana Grup", "https://t.me/+aceUsVtKUB03OWI8"))
         conn.commit()
 
 
-def get_setting(key: str) -> str:
+# ─── Settings ────────────────────────────────────────────────
+
+def get_setting(key: str, default: str = "") -> str:
     with get_conn() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-        return row["value"] if row else ""
+        return row["value"] if row else default
 
 
 def set_setting(key: str, value: str):
     with get_conn() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-            (key, value)
-        )
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
         conn.commit()
 
+
+# ─── Channels ────────────────────────────────────────────────
 
 def get_all_channels():
     with get_conn() as conn:
@@ -94,56 +129,209 @@ def remove_channel(channel_id: str):
         conn.commit()
 
 
-def upsert_user(user_id: int, username: str = "", first_name: str = ""):
+def update_channel(channel_id: str, channel_name: str, invite_link: str):
     with get_conn() as conn:
-        conn.execute("""
-            INSERT INTO users (user_id, username, first_name, last_seen)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                username=excluded.username,
-                first_name=excluded.first_name,
-                last_seen=excluded.last_seen
-        """, (user_id, username or "", first_name or "", datetime.now().isoformat()))
+        conn.execute(
+            "UPDATE channels SET channel_name=?, invite_link=? WHERE channel_id=?",
+            (channel_name, invite_link, channel_id)
+        )
+        conn.commit()
+
+
+# ─── Users ───────────────────────────────────────────────────
+
+def upsert_user(user_id: int, username: str = "", first_name: str = "", last_name: str = ""):
+    now = datetime.now().isoformat()
+    with get_conn() as conn:
+        existing = conn.execute("SELECT total_starts FROM users WHERE user_id=?", (user_id,)).fetchone()
+        if existing:
+            conn.execute("""
+                UPDATE users SET username=?, first_name=?, last_name=?, last_seen=?,
+                total_starts=total_starts+1 WHERE user_id=?
+            """, (username or "", first_name or "", last_name or "", now, user_id))
+        else:
+            conn.execute("""
+                INSERT INTO users (user_id, username, first_name, last_name, last_seen)
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_id, username or "", first_name or "", last_name or "", now))
         conn.commit()
 
 
 def set_user_member(user_id: int, is_member: bool):
     with get_conn() as conn:
-        conn.execute(
-            "UPDATE users SET is_member=? WHERE user_id=?",
-            (1 if is_member else 0, user_id)
-        )
+        conn.execute("UPDATE users SET is_member=? WHERE user_id=?", (1 if is_member else 0, user_id))
+        conn.commit()
+
+
+def get_user(user_id: int):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
+
+
+def search_users(query: str):
+    with get_conn() as conn:
+        q = f"%{query}%"
+        return conn.execute(
+            "SELECT * FROM users WHERE username LIKE ? OR first_name LIKE ? OR CAST(user_id AS TEXT) LIKE ? LIMIT 10",
+            (q, q, q)
+        ).fetchall()
+
+
+def ban_user(user_id: int, reason: str = ""):
+    with get_conn() as conn:
+        conn.execute("UPDATE users SET is_banned=1, ban_reason=? WHERE user_id=?", (reason, user_id))
+        conn.commit()
+
+
+def unban_user(user_id: int):
+    with get_conn() as conn:
+        conn.execute("UPDATE users SET is_banned=0, ban_reason='' WHERE user_id=?", (user_id,))
         conn.commit()
 
 
 def get_user_count() -> int:
     with get_conn() as conn:
-        row = conn.execute("SELECT COUNT(*) as c FROM users").fetchone()
-        return row["c"]
+        return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
 
 def get_member_count() -> int:
     with get_conn() as conn:
-        row = conn.execute("SELECT COUNT(*) as c FROM users WHERE is_member=1").fetchone()
-        return row["c"]
+        return conn.execute("SELECT COUNT(*) FROM users WHERE is_member=1 AND is_banned=0").fetchone()[0]
 
 
-def get_all_user_ids():
+def get_banned_count() -> int:
     with get_conn() as conn:
-        rows = conn.execute("SELECT user_id FROM users").fetchall()
+        return conn.execute("SELECT COUNT(*) FROM users WHERE is_banned=1").fetchone()[0]
+
+
+def get_today_count() -> int:
+    today = datetime.now().strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        return conn.execute("SELECT COUNT(*) FROM users WHERE joined_at LIKE ?", (f"{today}%",)).fetchone()[0]
+
+
+def get_week_count() -> int:
+    week_ago = (datetime.now() - timedelta(days=7)).isoformat()
+    with get_conn() as conn:
+        return conn.execute("SELECT COUNT(*) FROM users WHERE joined_at >= ?", (week_ago,)).fetchone()[0]
+
+
+def get_month_count() -> int:
+    month_ago = (datetime.now() - timedelta(days=30)).isoformat()
+    with get_conn() as conn:
+        return conn.execute("SELECT COUNT(*) FROM users WHERE joined_at >= ?", (month_ago,)).fetchone()[0]
+
+
+def get_all_user_ids(target: str = "all"):
+    with get_conn() as conn:
+        if target == "members":
+            rows = conn.execute("SELECT user_id FROM users WHERE is_member=1 AND is_banned=0").fetchall()
+        elif target == "nonmembers":
+            rows = conn.execute("SELECT user_id FROM users WHERE is_member=0 AND is_banned=0").fetchall()
+        else:
+            rows = conn.execute("SELECT user_id FROM users WHERE is_banned=0").fetchall()
         return [r["user_id"] for r in rows]
 
 
-def save_broadcast(message: str, sent_count: int):
+def get_banned_users(limit=20):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM users WHERE is_banned=1 ORDER BY user_id DESC LIMIT ?", (limit,)).fetchall()
+
+
+def get_recent_users(limit=10):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM users ORDER BY joined_at DESC LIMIT ?", (limit,)).fetchall()
+
+
+# ─── Admins ──────────────────────────────────────────────────
+
+def get_all_admins():
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM admins ORDER BY added_at").fetchall()
+
+
+def add_admin(user_id: int, added_by: int):
+    with get_conn() as conn:
+        conn.execute("INSERT OR IGNORE INTO admins (user_id, added_by) VALUES (?, ?)", (user_id, added_by))
+        conn.commit()
+
+
+def remove_admin(user_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM admins WHERE user_id=?", (user_id,))
+        conn.commit()
+
+
+def is_admin_db(user_id: int, root_admin: int) -> bool:
+    if user_id == root_admin:
+        return True
+    with get_conn() as conn:
+        row = conn.execute("SELECT 1 FROM admins WHERE user_id=?", (user_id,)).fetchone()
+        return row is not None
+
+
+# ─── Broadcasts ──────────────────────────────────────────────
+
+def save_broadcast(admin_id: int, message: str, target: str, sent: int, failed: int):
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO broadcasts (message, sent_count) VALUES (?, ?)",
-            (message, sent_count)
+            "INSERT INTO broadcasts (admin_id, message, target, sent_count, failed_count) VALUES (?, ?, ?, ?, ?)",
+            (admin_id, message, target, sent, failed)
         )
         conn.commit()
 
 
+def get_broadcasts(limit=5):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM broadcasts ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
 def get_broadcast_count() -> int:
     with get_conn() as conn:
-        row = conn.execute("SELECT COUNT(*) as c FROM broadcasts").fetchone()
-        return row["c"]
+        return conn.execute("SELECT COUNT(*) FROM broadcasts").fetchone()[0]
+
+
+# ─── Admin Logs ──────────────────────────────────────────────
+
+def log_action(admin_id: int, action: str, detail: str = ""):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO admin_logs (admin_id, action, detail) VALUES (?, ?, ?)",
+            (admin_id, action, detail)
+        )
+        conn.commit()
+
+
+def get_recent_logs(limit=20):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM admin_logs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
+# ─── Reward Links ────────────────────────────────────────────
+
+def get_active_reward_links():
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM reward_links WHERE is_active=1 ORDER BY id").fetchall()
+
+
+def get_all_reward_links():
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM reward_links ORDER BY id").fetchall()
+
+
+def add_reward_link(label: str, url: str):
+    with get_conn() as conn:
+        conn.execute("INSERT INTO reward_links (label, url) VALUES (?, ?)", (label, url))
+        conn.commit()
+
+
+def remove_reward_link(link_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM reward_links WHERE id=?", (link_id,))
+        conn.commit()
+
+
+def toggle_reward_link(link_id: int):
+    with get_conn() as conn:
+        conn.execute("UPDATE reward_links SET is_active = 1 - is_active WHERE id=?", (link_id,))
+        conn.commit()
