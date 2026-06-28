@@ -38,7 +38,19 @@ def init_db():
                 is_banned INTEGER DEFAULT 0,
                 ban_reason TEXT,
                 last_seen TEXT,
-                total_starts INTEGER DEFAULT 1
+                total_starts INTEGER DEFAULT 1,
+                referral_count INTEGER DEFAULT 0,
+                referred_by INTEGER DEFAULT NULL,
+                reward_given INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS referrals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                referrer_id INTEGER NOT NULL,
+                referred_id INTEGER NOT NULL UNIQUE,
+                channels_joined INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                confirmed_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS admins (
@@ -74,16 +86,28 @@ def init_db():
             );
         """)
 
+        # Mevcut tabloya sütun ekle (eski DB için)
+        for col, definition in [
+            ("referral_count", "INTEGER DEFAULT 0"),
+            ("referred_by", "INTEGER DEFAULT NULL"),
+            ("reward_given", "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} {definition}")
+            except Exception:
+                pass
+
         defaults = {
             "welcome_message": "👋 Merhaba <b>{name}</b>!\n\nDevam etmek için aşağıdaki kanallara katılman gerekiyor. 👇",
-            "success_message": "✅ <b>Tebrikler!</b> Tüm kanallara katıldın.\n\nİşte sana özel link:",
+            "success_message": "✅ <b>Tebrikler!</b> Tüm kanallara katıldın.\n\nŞimdi <b>5 kişiyi</b> davet etmen gerekiyor.\nDavet ettiklerin de kanallara katılmalı.",
             "pending_message": "⏳ Henüz tüm kanallara katılmadın!\n\nLütfen tüm kanalları takip edip tekrar dene.",
+            "reward_message": "🎉 <b>Tebrikler! 5 davetini tamamladın!</b>\n\nİşte sana özel link:",
             "maintenance_mode": "0",
             "maintenance_message": "🔧 Bot şu an bakımda. Lütfen daha sonra tekrar deneyin.",
             "force_join": "1",
             "bot_active": "1",
             "join_button_text": "✅ Katıldım, Kontrol Et",
-            "start_photo": "",
+            "required_refs": "5",
         }
         for key, val in defaults.items():
             conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, val))
@@ -129,18 +153,9 @@ def remove_channel(channel_id: str):
         conn.commit()
 
 
-def update_channel(channel_id: str, channel_name: str, invite_link: str):
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE channels SET channel_name=?, invite_link=? WHERE channel_id=?",
-            (channel_name, invite_link, channel_id)
-        )
-        conn.commit()
-
-
 # ─── Users ───────────────────────────────────────────────────
 
-def upsert_user(user_id: int, username: str = "", first_name: str = "", last_name: str = ""):
+def upsert_user(user_id: int, username: str = "", first_name: str = "", last_name: str = "", referred_by: int = None):
     now = datetime.now().isoformat()
     with get_conn() as conn:
         existing = conn.execute("SELECT total_starts FROM users WHERE user_id=?", (user_id,)).fetchone()
@@ -151,10 +166,11 @@ def upsert_user(user_id: int, username: str = "", first_name: str = "", last_nam
             """, (username or "", first_name or "", last_name or "", now, user_id))
         else:
             conn.execute("""
-                INSERT INTO users (user_id, username, first_name, last_name, last_seen)
-                VALUES (?, ?, ?, ?, ?)
-            """, (user_id, username or "", first_name or "", last_name or "", now))
+                INSERT INTO users (user_id, username, first_name, last_name, last_seen, referred_by)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (user_id, username or "", first_name or "", last_name or "", now, referred_by))
         conn.commit()
+        return existing is None  # True = yeni kullanıcı
 
 
 def set_user_member(user_id: int, is_member: bool):
@@ -166,6 +182,12 @@ def set_user_member(user_id: int, is_member: bool):
 def get_user(user_id: int):
     with get_conn() as conn:
         return conn.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
+
+
+def mark_reward_given(user_id: int):
+    with get_conn() as conn:
+        conn.execute("UPDATE users SET reward_given=1 WHERE user_id=?", (user_id,))
+        conn.commit()
 
 
 def search_users(query: str):
@@ -243,6 +265,65 @@ def get_recent_users(limit=10):
         return conn.execute("SELECT * FROM users ORDER BY joined_at DESC LIMIT ?", (limit,)).fetchall()
 
 
+# ─── Referral ────────────────────────────────────────────────
+
+def add_referral(referrer_id: int, referred_id: int):
+    """Yeni referans kaydı oluştur (henüz onaylanmadı)."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO referrals (referrer_id, referred_id) VALUES (?, ?)",
+            (referrer_id, referred_id)
+        )
+        conn.commit()
+
+
+def confirm_referral(referred_id: int) -> int | None:
+    """Davet edilen kişi kanalları onaylayınca çağrılır. Referrer ID döner."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT referrer_id FROM referrals WHERE referred_id=? AND channels_joined=0",
+            (referred_id,)
+        ).fetchone()
+        if not row:
+            return None
+        referrer_id = row["referrer_id"]
+        conn.execute(
+            "UPDATE referrals SET channels_joined=1, confirmed_at=? WHERE referred_id=?",
+            (datetime.now().isoformat(), referred_id)
+        )
+        conn.execute(
+            "UPDATE users SET referral_count=referral_count+1 WHERE user_id=?",
+            (referrer_id,)
+        )
+        conn.commit()
+        return referrer_id
+
+
+def get_referral_count(user_id: int) -> int:
+    """Geçerli (kanalları onaylanmış) referans sayısı."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT referral_count FROM users WHERE user_id=?", (user_id,)).fetchone()
+        return row["referral_count"] if row else 0
+
+
+def get_referral_details(user_id: int):
+    """Referans listesi detayları."""
+    with get_conn() as conn:
+        return conn.execute("""
+            SELECT r.referred_id, r.channels_joined, r.created_at, r.confirmed_at,
+                   u.first_name, u.username
+            FROM referrals r
+            LEFT JOIN users u ON u.user_id = r.referred_id
+            WHERE r.referrer_id=?
+            ORDER BY r.id DESC
+        """, (user_id,)).fetchall()
+
+
+def get_total_referral_count() -> int:
+    with get_conn() as conn:
+        return conn.execute("SELECT COUNT(*) FROM referrals WHERE channels_joined=1").fetchone()[0]
+
+
 # ─── Admins ──────────────────────────────────────────────────
 
 def get_all_admins():
@@ -281,7 +362,7 @@ def save_broadcast(admin_id: int, message: str, target: str, sent: int, failed: 
         conn.commit()
 
 
-def get_broadcasts(limit=5):
+def get_broadcasts(limit=10):
     with get_conn() as conn:
         return conn.execute("SELECT * FROM broadcasts ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
 
