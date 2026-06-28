@@ -108,6 +108,7 @@ def init_db():
             "bot_active": "1",
             "join_button_text": "✅ Katıldım, Kontrol Et",
             "required_refs": "5",
+            "share_text": "🎁 Bu botta bedava ödül var! Hemen katıl 👇",
         }
         for key, val in defaults.items():
             conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, val))
