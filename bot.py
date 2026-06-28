@@ -96,17 +96,25 @@ def send_referral_panel(chat_id: int, user_id: int):
     bar_filled = int((count / required) * 10) if required else 10
     bar = "🟩" * bar_filled + "⬜" * (10 - bar_filled)
 
+    share_text = db.get_setting("share_text", "🎁 Bu botta bedava ödül var! Hemen katıl 👇")
+
+    import urllib.parse
+    share_url = (
+        "https://t.me/share/url"
+        f"?url={urllib.parse.quote(link, safe='')}"
+        f"&text={urllib.parse.quote(share_text, safe='')}"
+    )
+
     text = (
-        f"✅ <b>Kanalları Geçtin!</b>\n\n"
         f"🎯 Ödülü almak için <b>{required} kişiyi</b> davet etmen gerekiyor.\n"
         f"Davet ettiklerin <b>kanallara katılmalı</b>.\n\n"
         f"📊 İlerleme: <b>{count}/{required}</b>\n"
         f"{bar}\n\n"
         f"⏳ <b>{remaining} kişi daha</b> davet et!\n\n"
-        f"🔗 <b>Davet Linkin:</b>\n<code>{link}</code>\n\n"
-        f"Linki kopyalayıp arkadaşlarınla paylaş."
+        f"🔗 <b>Davet Linkin:</b>\n<code>{link}</code>"
     )
     share_kb = InlineKeyboardMarkup(row_width=1)
+    share_kb.add(InlineKeyboardButton("👥 Arkadaşlarını Davet Et", url=share_url))
     share_kb.add(InlineKeyboardButton("📊 Durumumu Gör", callback_data="ref_status"))
     bot.send_message(chat_id, text, reply_markup=share_kb)
 
@@ -657,6 +665,14 @@ def cb_admin_router(call):
         set_state(uid, "edit_msg", {"key": "join_button_text"})
         cur = db.get_setting("join_button_text")
         bot.send_message(cid, f"🔘 <b>Buton Yazısı</b>\n\nMevcut: <i>{cur}</i>\n\nYeni yazıyı yaz:", parse_mode="HTML")
+
+    elif data == "msg_sharetext":
+        set_state(uid, "edit_msg", {"key": "share_text"})
+        cur = db.get_setting("share_text")
+        bot.send_message(cid,
+            f"📤 <b>Davet Paylaşım Metni</b>\n\n"
+            f"Bu metin, kullanıcı arkadaşını davet ettiğinde linkin yanında görünür.\n\n"
+            f"Mevcut:\n<i>{cur}</i>\n\nYeni metni yaz:", parse_mode="HTML")
 
     # ── Admin yönetimi ───────────────────────────────────────
 
