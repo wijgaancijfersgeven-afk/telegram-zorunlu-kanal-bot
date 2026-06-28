@@ -113,6 +113,11 @@ def init_db():
         for key, val in defaults.items():
             conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, val))
 
+        # required_refs "0" ya da geçersizse düzelt
+        row = conn.execute("SELECT value FROM settings WHERE key='required_refs'").fetchone()
+        if not row or not row["value"] or int(row["value"]) < 1:
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('required_refs', '5')")
+
         conn.execute("INSERT OR IGNORE INTO reward_links (label, url) VALUES (?, ?)",
                      ("Ana Grup", "https://t.me/+aceUsVtKUB03OWI8"))
         conn.commit()
