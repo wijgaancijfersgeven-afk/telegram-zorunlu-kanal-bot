@@ -52,7 +52,8 @@ def get_setting_bool(key: str) -> bool:
 
 def get_required_refs() -> int:
     try:
-        return int(db.get_setting("required_refs", "5"))
+        val = int(db.get_setting("required_refs", "5"))
+        return val if val >= 1 else 5
     except Exception:
         return 5
 
@@ -197,7 +198,7 @@ def cmd_start(msg):
 def _handle_after_channels(chat_id: int, user_id: int):
     """Kanalları geçtikten sonra referans kontrolü yap."""
     user_row = db.get_user(user_id)
-    required = get_required_refs()
+    required = get_required_refs()  # minimum 1, asla 0 olamaz
 
     # Ödül daha önce verilmişse tekrar verme
     if user_row and user_row["reward_given"]:
@@ -205,11 +206,13 @@ def _handle_after_channels(chat_id: int, user_id: int):
         return
 
     count = db.get_referral_count(user_id)
+
+    # Güvenlik: required asla 0 olmamalı, davet sistemi aktif
     if count >= required:
         db.mark_reward_given(user_id)
         send_reward(chat_id)
     else:
-        # Referans mesajını göster
+        # Referans panelini göster - ödül linki VERİLMEZ
         success_msg = db.get_setting("success_message")
         bot.send_message(chat_id, success_msg)
         send_referral_panel(chat_id, user_id)
@@ -880,7 +883,9 @@ def handle_text(msg):
 # ─── Başlatma ────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("🤖 Zorunlu Kanal Bot (Referans Sistemi) başlatıldı...")
+    required = get_required_refs()
+    print(f"🤖 Zorunlu Kanal Bot v2 (Referans Sistemi) başlatıldı...")
+    print(f"✅ Gerekli referans sayısı: {required}")
     try:
         bot.set_my_commands([
             BotCommand("start", "Botu başlat"),
