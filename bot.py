@@ -159,6 +159,23 @@ def cmd_start(msg):
     if is_new and referrer_id:
         db.add_referral(referrer_id, user.id)
 
+    # Admin bildirimi
+    try:
+        name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "—"
+        uname = f"@{user.username}" if user.username else "kullanıcı adı yok"
+        ref_info = f"\n🔗 Referans: <code>{referrer_id}</code>" if referrer_id else ""
+        status = "🆕 Yeni kullanıcı" if is_new else "🔄 Tekrar başlattı"
+        total = db.get_user_count()
+        bot.send_message(
+            ADMIN_ID,
+            f"{status}\n\n"
+            f"👤 {name} ({uname})\n"
+            f"🆔 <code>{user.id}</code>{ref_info}\n\n"
+            f"👥 Toplam kullanıcı: <b>{total}</b>"
+        )
+    except Exception:
+        pass
+
     if get_setting_bool("maintenance_mode") and not is_admin(user.id):
         bot.send_message(msg.chat.id, db.get_setting("maintenance_message"))
         return
