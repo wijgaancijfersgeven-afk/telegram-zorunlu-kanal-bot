@@ -125,7 +125,7 @@ def init_db():
         default_channels = [
             ("@antinotice", "antinotice", "https://t.me/antinotice"),
             ("@regsafetelegramin", "regsafetelegramin", "https://t.me/regsafetelegramin"),
-            ("@safeteIegramin", "safeteIegramin", "https://t.me/safeteIegramin"),
+            ("@safeteIegram", "safeteIegram", "https://t.me/safeteIegram"),
         ]
         for ch_id, ch_name, ch_link in default_channels:
             conn.execute(
